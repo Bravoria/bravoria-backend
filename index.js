@@ -1,64 +1,35 @@
-// ... (todo o código inicial: express, pg, cors, bcrypt, etc. continua o mesmo)
+// ... (código inicial continua o mesmo)
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
-// A linha da OpenAI pode ser comentada ou removida por enquanto, mas vamos deixá-la para facilitar a reativação
-// const OpenAI = require('openai'); 
 
 const app = express();
-const port = process.env.PORT || 3001;
+// ... (código de configuração do app, pool, etc. continua o mesmo)
 
-app.use(cors());
-app.use(express.json());
-
-const connectionString = process.env.DATABASE_URL;
-const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
-
-// const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-async function initializeDatabase() { /* ...código da função... */ }
-app.post('/register', async (req, res) => { /* ...código da função... */ });
-app.post('/login', async (req, res) => { /* ...código da função... */ });
-app.get('/settings/:userId', async (req, res) => { /* ...código da função... */ });
-app.post('/settings', async (req, res) => { /* ...código da função... */ });
-
-// --- ROTA DE IA MODIFICADA (MODO SIMULAÇÃO) ---
-app.post('/generate-post-idea', async (req, res) => {
-    const { userId } = req.body;
-    if (!userId) {
-        return res.status(400).json({ message: 'ID do usuário é obrigatório.' });
-    }
-
+// --- ROTA DO CEO VIRTUAL ---
+app.get('/ceo-insights/:userId', async (req, res) => {
+    const { userId } = req.params;
     try {
         const settingsResult = await pool.query('SELECT specialty FROM clinic_settings WHERE user_id = $1', [userId]);
-        const specialty = settingsResult.rows[0]?.specialty;
+        const settings = settingsResult.rows[0];
 
-        if (!specialty) {
-            return res.status(404).json({ message: 'Por favor, salve sua especialidade nas configurações primeiro.' });
+        let insightMessage = '';
+
+        if (!settings || !settings.specialty) {
+            insightMessage = "Notei que você ainda não configurou sua especialidade. Preencha suas informações abaixo para que eu possa começar a gerar conteúdo de IA para você!";
+        } else {
+            insightMessage = `Tudo pronto com sua especialidade de ${settings.specialty}! Que tal gerar sua primeira ideia de post para aquecer suas redes sociais?`;
         }
-
-        // --- INÍCIO DO MODO SIMULAÇÃO ---
-        console.log(`[SIMULAÇÃO] Gerando ideia de post para a especialidade: ${specialty}`);
         
-        // Simula um pequeno atraso, como se a IA estivesse pensando
-        await new Promise(resolve => setTimeout(resolve, 1500)); 
-
-        const mockIdea = {
-            title: `[IDEIA SIMULADA] 5 Mitos Sobre ${specialty}`,
-            description: `Este é um post de teste gerado pelo modo de simulação. Quando a API da OpenAI for ativada, aqui aparecerá um conteúdo real e criativo sobre ${specialty}.`
-        };
-        
-        res.status(200).json(mockIdea);
-        // --- FIM DO MODO SIMULAÇÃO ---
+        res.status(200).json({ insight: insightMessage });
 
     } catch (error) {
-        console.error("Erro no modo de simulação:", error);
-        res.status(500).json({ message: "Erro interno no servidor de simulação." });
+        console.error("Erro ao gerar insight do CEO:", error);
+        res.status(500).json({ message: "Não foi possível gerar o insight no momento." });
     }
 });
 
-app.listen(port, () => {
-  console.log(`Backend da Bravor.ia rodando na porta ${port}`);
-  initializeDatabase();
-});
+// ... (todas as outras rotas: /register, /login, /settings, /generate-post-idea continuam aqui)
+
+app.listen(port, () => { /* ... */ });
