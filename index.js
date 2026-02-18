@@ -2,19 +2,28 @@ const express = require('express');
 const { Pool } = require('pg');
 
 const app = express();
-const port = 3001;
+const port = process.env.PORT || 3001; // Render usa uma porta dinâmica
 
-// !! IMPORTANTE: Substitua pela sua string de conexão do Neon !!
-const connectionString = postgresql://neondb_owner:npg_crqWpEt0m4KT@ep-frosty-violet-aikb47ve-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require;
+// CORREÇÃO: Lê a string de conexão da variável de ambiente
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  console.error('Erro Crítico: A variável de ambiente DATABASE_URL não foi definida.');
+  process.exit(1); // Encerra o processo se o banco de dados não estiver configurado
+}
 
 const pool = new Pool({
   connectionString: connectionString,
+  ssl: {
+    rejectUnauthorized: false // Necessário para conexões com Neon/Render
+  }
 });
 
 // Função para criar a tabela de usuários se ela não existir
 async function createUsersTable() {
-  const client = await pool.connect();
+  let client; // Declarado fora do try para estar acessível no finally
   try {
+    client = await pool.connect();
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -26,17 +35,19 @@ async function createUsersTable() {
     `);
     console.log('Tabela "users" verificada/criada com sucesso!');
   } catch (err) {
-    console.error('Erro ao criar a tabela "users":', err);
+    console.error('Erro ao conectar ou criar a tabela "users":', err);
   } finally {
-    client.release();
+    if (client) {
+      client.release(); // Garante que a conexão seja liberada
+    }
   }
 }
 
 app.get('/', (req, res) => {
-  res.send('Olá! Eu sou o backend da Bravor.ia. Estou funcionando!');
+  res.send('Olá! Eu sou o backend da Bravor.ia. Estou funcionando e corrigido!');
 });
 
 app.listen(port, () => {
   console.log(`Backend da Bravor.ia rodando na porta ${port}`);
-  createUsersTable(); // Chama a função para criar a tabela ao iniciar
+  createUsersTable();
 });
