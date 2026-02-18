@@ -1,8 +1,10 @@
+// ... (todo o código inicial: express, pg, cors, bcrypt, etc. continua o mesmo)
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
-const OpenAI = require('openai'); // Importa a biblioteca da OpenAI
+// A linha da OpenAI pode ser comentada ou removida por enquanto, mas vamos deixá-la para facilitar a reativação
+// const OpenAI = require('openai'); 
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -10,27 +12,18 @@ const port = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// --- CONFIGURAÇÕES ---
 const connectionString = process.env.DATABASE_URL;
 const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
 
-// Configura a OpenAI com a chave da variável de ambiente
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+// const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// --- INICIALIZAÇÃO DO BANCO ---
-async function initializeDatabase() { /* ...código existente... */ }
+async function initializeDatabase() { /* ...código da função... */ }
+app.post('/register', async (req, res) => { /* ...código da função... */ });
+app.post('/login', async (req, res) => { /* ...código da função... */ });
+app.get('/settings/:userId', async (req, res) => { /* ...código da função... */ });
+app.post('/settings', async (req, res) => { /* ...código da função... */ });
 
-// --- ROTAS DE AUTENTICAÇÃO ---
-app.post('/register', async (req, res) => { /* ...código existente... */ });
-app.post('/login', async (req, res) => { /* ...código existente... */ });
-
-// --- ROTAS DE CONFIGURAÇÃO ---
-app.get('/settings/:userId', async (req, res) => { /* ...código existente... */ });
-app.post('/settings', async (req, res) => { /* ...código existente... */ });
-
-// --- NOVA ROTA DE IA ---
+// --- ROTA DE IA MODIFICADA (MODO SIMULAÇÃO) ---
 app.post('/generate-post-idea', async (req, res) => {
     const { userId } = req.body;
     if (!userId) {
@@ -38,7 +31,6 @@ app.post('/generate-post-idea', async (req, res) => {
     }
 
     try {
-        // 1. Buscar a especialidade do usuário no banco
         const settingsResult = await pool.query('SELECT specialty FROM clinic_settings WHERE user_id = $1', [userId]);
         const specialty = settingsResult.rows[0]?.specialty;
 
@@ -46,27 +38,25 @@ app.post('/generate-post-idea', async (req, res) => {
             return res.status(404).json({ message: 'Por favor, salve sua especialidade nas configurações primeiro.' });
         }
 
-        // 2. Montar o prompt para a IA
-        const prompt = `Aja como um especialista em marketing de conteúdo para a área da saúde. Gere uma ideia de post para Instagram para um profissional de ${specialty}. A resposta deve ser um JSON contendo "title" (um título chamativo) e "description" (um parágrafo curto explicando o post).`;
-
-        // 3. Chamar a API da OpenAI
-        const completion = await openai.chat.completions.create({
-            model: "gpt-3.5-turbo", // Modelo rápido e eficiente
-            messages: [{ role: "user", content: prompt }],
-            response_format: { type: "json_object" }, // Pede a resposta em formato JSON
-        });
-
-        const idea = JSON.parse(completion.choices[0].message.content);
+        // --- INÍCIO DO MODO SIMULAÇÃO ---
+        console.log(`[SIMULAÇÃO] Gerando ideia de post para a especialidade: ${specialty}`);
         
-        // 4. Enviar a ideia de volta para o frontend
-        res.status(200).json(idea);
+        // Simula um pequeno atraso, como se a IA estivesse pensando
+        await new Promise(resolve => setTimeout(resolve, 1500)); 
+
+        const mockIdea = {
+            title: `[IDEIA SIMULADA] 5 Mitos Sobre ${specialty}`,
+            description: `Este é um post de teste gerado pelo modo de simulação. Quando a API da OpenAI for ativada, aqui aparecerá um conteúdo real e criativo sobre ${specialty}.`
+        };
+        
+        res.status(200).json(mockIdea);
+        // --- FIM DO MODO SIMULAÇÃO ---
 
     } catch (error) {
-        console.error("Erro ao gerar ideia de post:", error);
-        res.status(500).json({ message: "Não foi possível gerar a ideia de post no momento." });
+        console.error("Erro no modo de simulação:", error);
+        res.status(500).json({ message: "Erro interno no servidor de simulação." });
     }
 });
-
 
 app.listen(port, () => {
   console.log(`Backend da Bravor.ia rodando na porta ${port}`);
