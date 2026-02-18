@@ -10,7 +10,12 @@ app.use(cors());
 app.use(express.json());
 
 const connectionString = process.env.DATABASE_URL;
-if (!connectionString) { /* ...código existente... */ }
+
+if (!connectionString) {
+  console.error('Erro Crítico: A variável de ambiente DATABASE_URL não foi definida.');
+  process.exit(1);
+}
+
 const pool = new Pool({
   connectionString: connectionString,
   ssl: { rejectUnauthorized: false }
@@ -20,7 +25,6 @@ const pool = new Pool({
 async function initializeDatabase() {
     const client = await pool.connect();
     try {
-        // Cria a tabela de usuários (se não existir)
         await client.query(`
           CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -30,7 +34,6 @@ async function initializeDatabase() {
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
           );
         `);
-        // Cria a tabela de configurações da clínica (se não existir)
         await client.query(`
           CREATE TABLE IF NOT EXISTS clinic_settings (
             id SERIAL PRIMARY KEY,
@@ -49,13 +52,55 @@ async function initializeDatabase() {
     }
 }
 
-// Rotas de autenticação (/register, /login) - continuam as mesmas
-app.post('/register', async (req, res) => { /* ...código existente... */ });
-app.post('/login', async (req, res) => { /* ...código existente... */ });
+// --- ROTAS DE AUTENTICAÇÃO ---
+app.post('/register', async (req, res) => {
+  const { fullName, email, password } = req.body;
+  if (!fullName || !email || !password) {
+    return res.status(400).json({ message: 'Todos os campos são obrigatórios.' });
+  }
+  try {
+    const salt = await bcrypt.genSalt(10);
+    const password_hash = await bcrypt.hash(password, salt);
+    const result = await pool.query(
+      'INSERT INTO users (full_name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, email, full_name',
+      [fullName, email, password_hash]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ message: 'Este e-mail já está em uso.' });
+    }
+    console.error('Erro ao registrar usuário:', error);
+    res.status(500).json({ message: 'Erro interno do servidor.' });
+  }
+});
 
-// --- NOVAS ROTAS DE CONFIGURAÇÃO ---
+app.post('/login', async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+        return res.status(400).json({ message: 'E-mail e senha são obrigatórios.' });
+    }
+    try {
+        const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+        const user = result.rows[0];
+        if (!user) {
+            return res.status(404).json({ message: 'Usuário não encontrado.' });
+        }
+        const isMatch = await bcrypt.compare(password, user.password_hash);
+        if (!isMatch) {
+            return res.status(401).json({ message: 'Senha incorreta.' });
+        }
+        res.status(200).json({
+            message: 'Login bem-sucedido!',
+            user: { id: user.id, fullName: user.full_name, email: user.email }
+        });
+    } catch (error) {
+        console.error('Erro no login:', error);
+        res.status(500).json({ message: 'Erro interno do servidor.' });
+    }
+});
 
-// Rota para BUSCAR as configurações do usuário
+// --- ROTAS DE CONFIGURAÇÃO ---
 app.get('/settings/:userId', async (req, res) => {
     const { userId } = req.params;
     try {
@@ -63,7 +108,7 @@ app.get('/settings/:userId', async (req, res) => {
         if (result.rows.length > 0) {
             res.status(200).json(result.rows[0]);
         } else {
-            res.status(404).json({ message: 'Nenhuma configuração encontrada para este usuário.' });
+            res.status(404).json({ message: 'Nenhuma configuração encontrada.' });
         }
     } catch (error) {
         console.error('Erro ao buscar configurações:', error);
@@ -71,15 +116,12 @@ app.get('/settings/:userId', async (req, res) => {
     }
 });
 
-// Rota para SALVAR ou ATUALIZAR as configurações
 app.post('/settings', async (req, res) => {
     const { userId, specialty, insurances, address } = req.body;
     if (!userId) {
         return res.status(400).json({ message: 'ID do usuário é obrigatório.' });
     }
-
     try {
-        // "UPSERT": Insere se não existir, atualiza se existir.
         const query = `
             INSERT INTO clinic_settings (user_id, specialty, insurances, address)
             VALUES ($1, $2, $3, $4)
@@ -99,10 +141,11 @@ app.post('/settings', async (req, res) => {
     }
 });
 
-
-app.get('/', (req, res) => { /* ...código existente... */ });
+app.get('/', (req, res) => {
+  res.send('Backend da Bravor.ia v3: Pronto para salvar configurações!');
+});
 
 app.listen(port, () => {
   console.log(`Backend da Bravor.ia rodando na porta ${port}`);
-  initializeDatabase(); // Chama a nova função de inicialização
+  initializeDatabase();
 });
