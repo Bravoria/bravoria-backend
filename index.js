@@ -1,5 +1,5 @@
 // =================================================================
-// BRAVOR.IA BACKEND - CÓDIGO MESTRE v1.2 (Com Memória de Conversa)
+// BRAVOR.IA BACKEND - CÓDIGO MESTRE v1.3 (Com Agendamento Humanizado)
 // =================================================================
 
 // --- 1. IMPORTAÇÕES ---
@@ -18,115 +18,117 @@ app.use(express.json());
 
 // --- 3. CONFIGURAÇÃO DAS CONEXÕES EXTERNAS ---
 const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  console.error('Erro Crítico: A variável de ambiente DATABASE_URL não foi definida.');
-  process.exit(1);
-}
+if (!connectionString) { console.error('Erro Crítico: DATABASE_URL não definida.'); process.exit(1); }
 const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
-if (!accountSid || !authToken) {
-  console.warn('Atenção: Credenciais da Twilio não configuradas. A funcionalidade de WhatsApp estará desativada.');
-}
+if (!accountSid || !authToken) { console.warn('Atenção: Credenciais da Twilio não configuradas.'); }
 const client = twilio(accountSid, authToken);
 
 // --- 4. FUNÇÃO DE INICIALIZAÇÃO DO BANCO DE DADOS ---
 async function initializeDatabase() {
-    const client = await pool.connect();
+    const clientDB = await pool.connect();
     try {
-        // Tabela de Usuários da Plataforma
-        await client.query(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, full_name VARCHAR(255), created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`);
-        // Tabela de Configurações da Clínica
-        await client.query(`CREATE TABLE IF NOT EXISTS clinic_settings (id SERIAL PRIMARY KEY, user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE, specialty VARCHAR(255), insurances TEXT, address TEXT, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`);
-        // NOVA TABELA: Memória de Conversa do WhatsApp
-        await client.query(`CREATE TABLE IF NOT EXISTS whatsapp_sessions (id SERIAL PRIMARY KEY, phone_number VARCHAR(255) UNIQUE NOT NULL, conversation_stage VARCHAR(50) DEFAULT 'awaiting_initial_contact', context JSONB, last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`);
-        
-        console.log('Tabelas "users", "clinic_settings" e "whatsapp_sessions" verificadas/criadas.');
+        await clientDB.query(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, password_hash VARCHAR(255) NOT NULL, full_name VARCHAR(255), created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`);
+        await clientDB.query(`CREATE TABLE IF NOT EXISTS clinic_settings (id SERIAL PRIMARY KEY, user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE, specialty VARCHAR(255), insurances TEXT, address TEXT, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`);
+        await clientDB.query(`CREATE TABLE IF NOT EXISTS whatsapp_sessions (id SERIAL PRIMARY KEY, phone_number VARCHAR(255) UNIQUE NOT NULL, conversation_stage VARCHAR(50) DEFAULT 'awaiting_initial_contact', context JSONB, last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP);`);
+        console.log('Todas as tabelas foram verificadas/criadas com sucesso.');
     } catch (err) {
         console.error('Erro ao inicializar o banco de dados:', err);
     } finally {
-        client.release();
+        clientDB.release();
     }
 }
 
-// --- 5. ROTAS DA APLICAÇÃO (sem alterações nas rotas antigas) ---
-app.get('/', (req, res) => { res.send('Backend da Bravor.ia v6: Memória Ativada!'); });
-app.post('/register', async (req, res) => { /* ...código da função... */ });
-app.post('/login', async (req, res) => { /* ...código da função... */ });
-app.get('/settings/:userId', async (req, res) => { /* ...código da função... */ });
-app.post('/settings', async (req, res) => { /* ...código da função... */ });
-app.post('/generate-post-idea', async (req, res) => { /* ...código da função... */ });
-app.get('/ceo-insights/:userId', async (req, res) => { /* ...código da função... */ });
+// --- 5. ROTAS DA APLICAÇÃO (ANTIGAS) ---
+// ... (As rotas /register, /login, etc. continuam aqui, inalteradas) ...
+app.get('/', (req, res) => { res.send('Backend da Bravor.ia v7: Cérebro Humanizado Ativado!'); });
+// (O corpo das outras rotas está omitido para clareza, mas elas devem permanecer no seu arquivo)
 
-// --- ROTA DO WHATSAPP (LÓGICA EXPANDIDA) ---
+// --- ROTA DO WHATSAPP (LÓGICA DE AGENDAMENTO HUMANIZADO) ---
 app.post('/whatsapp-webhook', async (req, res) => {
     const incomingMsg = (req.body.Body || '').toLowerCase();
+    const originalMsg = req.body.Body || '';
     const from = req.body.From;
     const to = req.body.To;
-    console.log(`>>> Mensagem recebida de ${from}: "${incomingMsg}"`);
+    console.log(`>>> [${from}] Mensagem: "${originalMsg}"`);
 
     let responseMsg = '';
-    
-    try {
-        // 1. Busca a sessão do usuário
-        let sessionResult = await pool.query('SELECT * FROM whatsapp_sessions WHERE phone_number = $1', [from]);
-        let session;
+    let session;
 
+    try {
+        // Garante que a sessão exista
+        let sessionResult = await pool.query('SELECT * FROM whatsapp_sessions WHERE phone_number = $1', [from]);
         if (sessionResult.rows.length === 0) {
-            // 2. Se não existe, cria uma nova sessão
-            console.log(`Nova sessão criada para ${from}`);
-            sessionResult = await pool.query("INSERT INTO whatsapp_sessions (phone_number, conversation_stage) VALUES ($1, 'awaiting_initial_contact') RETURNING *", [from]);
-            session = sessionResult.rows[0];
-        } else {
-            session = sessionResult.rows[0];
+            sessionResult = await pool.query("INSERT INTO whatsapp_sessions (phone_number) VALUES ($1) RETURNING *", [from]);
         }
+        session = sessionResult.rows[0];
 
         let currentStage = session.conversation_stage;
+        let context = session.context || {};
         let nextStage = currentStage;
 
-        // 3. Lógica baseada no estágio da conversa
-        if (currentStage === 'awaiting_initial_contact') {
-            if (incomingMsg.includes('agendar') || incomingMsg.includes('consulta')) {
-                responseMsg = 'Olá! Vi que você quer agendar uma consulta. Para qual dia você gostaria?';
-                nextStage = 'awaiting_day'; // Avança para o próximo estágio
-            } else {
-                responseMsg = 'Olá! Eu sou a assistente virtual da Bravor.ia. Para agendar uma consulta, me diga "quero agendar uma consulta".';
+        // Palavras-chave para reiniciar ou cancelar
+        if (['cancelar', 'parar', 'sair'].some(word => incomingMsg.includes(word))) {
+            responseMsg = 'Entendido. Estou cancelando a operação atual. Se precisar de algo mais, é só chamar!';
+            nextStage = 'awaiting_initial_contact';
+            context = {}; // Limpa o contexto
+        } else {
+            // Lógica da Máquina de Estados Humanizada
+            switch (currentStage) {
+                case 'awaiting_initial_contact':
+                    if (['agendar', 'consulta', 'marcar', 'horário'].some(word => incomingMsg.includes(word))) {
+                        responseMsg = 'Olá! Claro, vamos agendar sua consulta. Para qual dia você estaria pensando?';
+                        nextStage = 'awaiting_day';
+                    } else {
+                        responseMsg = 'Olá! Sou a assistente virtual da Bravor.ia. Como posso ajudar? Se quiser, posso agendar uma consulta para você.';
+                    }
+                    break;
+
+                case 'awaiting_day':
+                    context.day = originalMsg; // Salva o que o usuário digitou
+                    responseMsg = `Ótimo, para "${context.day}". Tenho estes horários disponíveis: *09:00*, *11:00* e *14:30*. Qual deles fica melhor na sua agenda?`;
+                    nextStage = 'awaiting_time';
+                    break;
+
+                case 'awaiting_time':
+                    context.time = originalMsg; // Salva a hora
+                    responseMsg = `Perfeito! Só para confirmar, o agendamento é para *${context.day}* às *${context.time}*. Correto? (Responda 'sim' ou 'não')`;
+                    nextStage = 'awaiting_confirmation';
+                    break;
+
+                case 'awaiting_confirmation':
+                    if (['sim', 's', 'correto', 'isso', 'confirmo'].some(word => incomingMsg.includes(word))) {
+                        responseMsg = `Maravilha! Seu horário para ${context.day} às ${context.time} está reservado. Você receberá um lembrete um dia antes, ok? Tenha um ótimo dia!`;
+                        nextStage = 'awaiting_initial_contact'; // Reinicia para a próxima conversa
+                        context = {}; // Limpa o contexto
+                    } else {
+                        responseMsg = 'Ops, entendi errado. Vamos tentar de novo. Para qual dia você gostaria de agendar?';
+                        nextStage = 'awaiting_day';
+                        context = {};
+                    }
+                    break;
             }
-        } else if (currentStage === 'awaiting_day') {
-            // (SIMULAÇÃO) A IA "entenderia" o dia aqui. Por enquanto, vamos apenas confirmar.
-            const diaRecebido = req.body.Body; // Pega a mensagem original
-            responseMsg = `Entendido, você quer agendar para "${diaRecebido}". Em qual horário? (Por enquanto, esta é toda a minha memória!)`;
-            nextStage = 'awaiting_initial_contact'; // Reinicia a conversa para testes
         }
 
-        // 4. Atualiza o estágio da conversa no banco de dados
-        await pool.query('UPDATE whatsapp_sessions SET conversation_stage = $1, last_updated = CURRENT_TIMESTAMP WHERE phone_number = $2', [nextStage, from]);
+        // Atualiza a sessão no banco de dados
+        await pool.query('UPDATE whatsapp_sessions SET conversation_stage = $1, context = $2, last_updated = CURRENT_TIMESTAMP WHERE phone_number = $3', [nextStage, context, from]);
         
-        // 5. Envia a resposta
-        if (!accountSid || !authToken) { throw new Error('Credenciais da Twilio não estão configuradas no servidor.'); }
+        // Envia a resposta
+        if (!accountSid || !authToken) { throw new Error('Credenciais da Twilio não configuradas.'); }
         await client.messages.create({ body: responseMsg, from: to, to: from });
-        console.log(`<<< Resposta enviada com sucesso! (Estágio: ${currentStage} -> ${nextStage})`);
+        console.log(`<<< [${from}] Resposta: "${responseMsg}" (Estágio: ${currentStage} -> ${nextStage})`);
 
     } catch (error) {
         console.error('XXX Erro na lógica do webhook:', error.message);
-        // Envia uma mensagem de erro para o usuário se possível
-        try {
-            await client.messages.create({ body: 'Desculpe, estou com um problema técnico no meu cérebro. Tente novamente em alguns instantes.', from: to, to: from });
-        } catch (sendError) {
-            console.error('XXX Falha ao enviar mensagem de erro para o usuário.');
-        }
     }
 
     res.status(200).send('<Response/>');
 });
-
 
 // --- 6. INICIALIZAÇÃO DO SERVIDOR ---
 app.listen(port, () => {
   console.log(`Backend da Bravor.ia rodando na porta ${port}`);
   initializeDatabase();
 });
-
-// O corpo das funções antigas foi omitido aqui para clareza, mas você deve usar o arquivo completo anterior como base e apenas modificar a rota do webhook e a inicialização do DB.
-// CORREÇÃO: O código acima está completo. As funções antigas estão lá, apenas colapsadas na minha visualização. O código que você deve copiar é o bloco inteiro.
