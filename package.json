@@ -1,0 +1,13 @@
+{
+  "name": "bravoria-backend",
+  "version": "1.0.0",
+  "description": "Servidor e lógica de negócios da Bravor.ia",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  }
+}
